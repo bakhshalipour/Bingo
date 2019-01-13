@@ -1,0 +1,678 @@
+/* Bingo */
+
+#include "cache.h"
+#include <bits/stdc++.h>
+
+using namespace std;
+
+class Table {
+  public:
+    Table(int width, int height) : width(width), height(height), cells(height, vector<string>(width)) {}
+
+    void set_row(int row, const vector<string> &data, int start_col = 0) {
+        assert(data.size() + start_col == this->width);
+        for (unsigned col = start_col; col < this->width; col += 1)
+            this->set_cell(row, col, data[col]);
+    }
+
+    void set_col(int col, const vector<string> &data, int start_row = 0) {
+        assert(data.size() + start_row == this->height);
+        for (unsigned row = start_row; row < this->height; row += 1)
+            this->set_cell(row, col, data[row]);
+    }
+
+    void set_cell(int row, int col, string data) {
+        assert(0 <= row && row < (int)this->height);
+        assert(0 <= col && col < (int)this->width);
+        this->cells[row][col] = data;
+    }
+
+    void set_cell(int row, int col, double data) {
+        this->oss.str("");
+        this->oss << setw(11) << fixed << setprecision(8) << data;
+        this->set_cell(row, col, this->oss.str());
+    }
+
+    void set_cell(int row, int col, int64_t data) {
+        this->oss.str("");
+        this->oss << setw(11) << std::left << data;
+        this->set_cell(row, col, this->oss.str());
+    }
+
+    void set_cell(int row, int col, int data) { this->set_cell(row, col, (int64_t)data); }
+
+    void set_cell(int row, int col, uint64_t data) { this->set_cell(row, col, (int64_t)data); }
+
+    string to_string() {
+        vector<int> widths;
+        for (unsigned i = 0; i < this->width; i += 1) {
+            int max_width = 0;
+            for (unsigned j = 0; j < this->height; j += 1)
+                max_width = max(max_width, (int)this->cells[j][i].size());
+            widths.push_back(max_width + 2);
+        }
+        string out;
+        out += Table::top_line(widths);
+        out += this->data_row(0, widths);
+        for (unsigned i = 1; i < this->height; i += 1) {
+            out += Table::mid_line(widths);
+            out += this->data_row(i, widths);
+        }
+        out += Table::bot_line(widths);
+        return out;
+    }
+
+    string data_row(int row, const vector<int> &widths) {
+        string out;
+        for (unsigned i = 0; i < this->width; i += 1) {
+            string data = this->cells[row][i];
+            data.resize(widths[i] - 2, ' ');
+            out += " | " + data;
+        }
+        out += " |\n";
+        return out;
+    }
+
+    static string top_line(const vector<int> &widths) { return Table::line(widths, "┌", "┬", "┐"); }
+
+    static string mid_line(const vector<int> &widths) { return Table::line(widths, "├", "┼", "┤"); }
+
+    static string bot_line(const vector<int> &widths) { return Table::line(widths, "└", "┴", "┘"); }
+
+    static string line(const vector<int> &widths, string left, string mid, string right) {
+        string out = " " + left;
+        for (unsigned i = 0; i < widths.size(); i += 1) {
+            int w = widths[i];
+            for (int j = 0; j < w; j += 1)
+                out += "─";
+            if (i != widths.size() - 1)
+                out += mid;
+            else
+                out += right;
+        }
+        return out + "\n";
+    }
+
+  private:
+    unsigned width;
+    unsigned height;
+    vector<vector<string>> cells;
+    ostringstream oss;
+};
+
+template <class T> class InfiniteCache {
+  public:
+    class Entry {
+      public:
+        uint64_t key;
+        uint64_t index;
+        uint64_t tag;
+        bool valid;
+        T data;
+    };
+
+    Entry *erase(uint64_t key) {
+        Entry *entry = this->find(key);
+        if (!entry)
+            return nullptr;
+        entry->valid = false;
+        this->last_erased_entry = *entry;
+        int num_erased = this->entries.erase(key);
+        assert(num_erased == 1);
+        return &this->last_erased_entry;
+    }
+
+    /**
+     * @return The old state of the entry that was written to.
+     */
+    Entry insert(uint64_t key, const T &data) {
+        Entry *entry = this->find(key);
+        if (entry != nullptr) {
+            Entry old_entry = *entry;
+            entry->data = data;
+            return old_entry;
+        }
+        entries[key] = {key, 0, key, true, data};
+        return {};
+    }
+
+    Entry *find(uint64_t key) {
+        auto it = this->entries.find(key);
+        if (it == this->entries.end())
+            return nullptr;
+        Entry &entry = (*it).second;
+        assert(entry.tag == key && entry.valid);
+        return &entry;
+    }
+
+    /**
+     * For debugging purposes.
+     */
+    string log(vector<string> headers, function<void(Entry &, Table &, int)> write_data) {
+        Table table(headers.size(), entries.size() + 1);
+        table.set_row(0, headers);
+        unsigned i = 0;
+        for (auto &x : this->entries)
+            write_data(x.second, table, ++i);
+        return table.to_string();
+    }
+
+    void set_debug_level(int debug_level) { this->debug_level = debug_level; }
+
+  protected:
+    Entry last_erased_entry;
+    unordered_map<uint64_t, Entry> entries;
+    int debug_level = 0;
+};
+
+template <class T> class SetAssociativeCache {
+  public:
+    class Entry {
+      public:
+        uint64_t key;
+        uint64_t index;
+        uint64_t tag;
+        bool valid;
+        T data;
+    };
+
+    SetAssociativeCache(int size, int num_ways)
+        : size(size), num_ways(num_ways), num_sets(size / num_ways), entries(num_sets, vector<Entry>(num_ways)),
+          cams(num_sets) {
+        assert(size % num_ways == 0);
+        for (int i = 0; i < num_sets; i += 1)
+            for (int j = 0; j < num_ways; j += 1)
+                entries[i][j].valid = false;
+    }
+
+    Entry *erase(uint64_t key) {
+        Entry *entry = this->find(key);
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        auto &cam = cams[index];
+        int num_erased = cam.erase(tag);
+        if (entry)
+            entry->valid = false;
+        assert(entry ? num_erased == 1 : num_erased == 0);
+        return entry;
+    }
+
+    /**
+     * @return The old state of the entry that was written to.
+     */
+    Entry insert(uint64_t key, const T &data) {
+        Entry *entry = this->find(key);
+        if (entry != nullptr) {
+            Entry old_entry = *entry;
+            entry->data = data;
+            return old_entry;
+        }
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        vector<Entry> &set = this->entries[index];
+        int victim_way = -1;
+        for (int i = 0; i < this->num_ways; i += 1)
+            if (!set[i].valid) {
+                victim_way = i;
+                break;
+            }
+        if (victim_way == -1) {
+            victim_way = this->select_victim(index);
+        }
+        Entry &victim = set[victim_way];
+        Entry old_entry = victim;
+        victim = {key, index, tag, true, data};
+        auto &cam = cams[index];
+        if (old_entry.valid) {
+            int num_erased = cam.erase(old_entry.tag);
+            assert(num_erased == 1);
+        }
+        cam[tag] = victim_way;
+        return old_entry;
+    }
+
+    Entry *find(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        auto &cam = cams[index];
+        if (cam.find(tag) == cam.end())
+            return nullptr;
+        int way = cam[tag];
+        Entry &entry = this->entries[index][way];
+        assert(entry.tag == tag && entry.valid);
+        return &entry;
+    }
+
+    /**
+     * For debugging purposes.
+     */
+    string log(vector<string> headers, function<void(Entry &, Table &, int)> write_data) {
+        vector<Entry> valid_entries = this->get_valid_entries();
+        Table table(headers.size(), valid_entries.size() + 1);
+        table.set_row(0, headers);
+        for (unsigned i = 0; i < valid_entries.size(); i += 1)
+            write_data(valid_entries[i], table, i + 1);
+        return table.to_string();
+    }
+
+    void set_debug_level(int debug_level) { this->debug_level = debug_level; }
+
+  protected:
+    /**
+     * @return The way of the selected victim.
+     */
+    virtual int select_victim(uint64_t index) {
+        /* random eviction policy if not overriden */
+        return rand() % this->num_ways;
+    }
+
+    vector<Entry> get_valid_entries() {
+        vector<Entry> valid_entries;
+        for (int i = 0; i < num_sets; i += 1)
+            for (int j = 0; j < num_ways; j += 1)
+                if (entries[i][j].valid)
+                    valid_entries.push_back(entries[i][j]);
+        return valid_entries;
+    }
+
+    int size;
+    int num_ways;
+    int num_sets;
+    vector<vector<Entry>> entries;
+    vector<unordered_map<uint64_t, int>> cams;
+    int debug_level = 0;
+};
+
+template <class T> class LRUSetAssociativeCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    LRUSetAssociativeCache(int size, int num_ways)
+        : Super(size, num_ways), lru(this->num_sets, vector<uint64_t>(num_ways)) {}
+
+    void set_mru(uint64_t key) { *this->get_lru(key) = this->t++; }
+
+    void set_lru(uint64_t key) { *this->get_lru(key) = 0; }
+
+  protected:
+    /* @override */
+    int select_victim(uint64_t index) {
+        vector<uint64_t> &lru_set = this->lru[index];
+        return min_element(lru_set.begin(), lru_set.end()) - lru_set.begin();
+    }
+
+    uint64_t *get_lru(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        int way = this->cams[index][tag];
+        return &this->lru[index][way];
+    }
+
+    vector<vector<uint64_t>> lru;
+    uint64_t t = 1;
+};
+
+template <class T> class NMRUSetAssociativeCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    NMRUSetAssociativeCache(int size, int num_ways) : Super(size, num_ways), mru(this->num_sets) {}
+
+    void set_mru(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        int way = this->cams[index][tag];
+        this->mru[index] = way;
+    }
+
+  protected:
+    /* @override */
+    int select_victim(uint64_t index) {
+        int way = rand() % (this->num_ways - 1);
+        if (way >= mru[index])
+            way += 1;
+        return way;
+    }
+
+    vector<int> mru;
+};
+
+template <class T> class LRUFullyAssociativeCache : public LRUSetAssociativeCache<T> {
+    typedef LRUSetAssociativeCache<T> Super;
+
+  public:
+    LRUFullyAssociativeCache(int size) : Super(size, size) {}
+};
+
+template <class T> class NMRUFullyAssociativeCache : public NMRUSetAssociativeCache<T> {
+    typedef NMRUSetAssociativeCache<T> Super;
+
+  public:
+    NMRUFullyAssociativeCache(int size) : Super(size, size) {}
+};
+
+template <class T> class DirectMappedCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    DirectMappedCache(int size) : Super(size, 1) {}
+};
+
+/** End Of Cache Framework **/
+
+class FilterTableData {
+  public:
+    uint64_t pc;
+    int offset;
+};
+
+class FilterTable : public LRUFullyAssociativeCache<FilterTableData> {
+    typedef LRUFullyAssociativeCache<FilterTableData> Super;
+
+  public:
+    FilterTable(int size) : Super(size) { assert(__builtin_popcount(size) == 1); }
+
+    Entry *find(uint64_t region_number) {
+        Entry *entry = Super::find(region_number);
+        if (!entry)
+            return nullptr;
+        this->set_mru(region_number);
+        return entry;
+    }
+
+    void insert(uint64_t region_number, uint64_t pc, int offset) {
+        assert(!this->find(region_number));
+        Super::insert(region_number, {pc, offset});
+        this->set_mru(region_number);
+    }
+};
+
+class AccumulationTableData {
+  public:
+    uint64_t pc;
+    int offset;
+    vector<bool> pattern;
+};
+
+class AccumulationTable : public LRUFullyAssociativeCache<AccumulationTableData> {
+    typedef LRUFullyAssociativeCache<AccumulationTableData> Super;
+
+  public:
+    AccumulationTable(int size, int pattern_len) : Super(size), pattern_len(pattern_len) {
+        assert(__builtin_popcount(size) == 1);
+        assert(__builtin_popcount(pattern_len) == 1);
+    }
+
+    /**
+     * @return A return value of false means that the tag wasn't found in the table and true means success.
+     */
+    bool set_pattern(uint64_t region_number, int offset) {
+        Entry *entry = Super::find(region_number);
+        if (!entry)
+            return false;
+        entry->data.pattern[offset] = true;
+        this->set_mru(region_number);
+        return true;
+    }
+
+    Entry insert(FilterTable::Entry &entry) {
+        assert(!this->find(entry.key));
+        vector<bool> pattern(this->pattern_len, false);
+        pattern[entry.data.offset] = true;
+        Entry old_entry = Super::insert(entry.key, {entry.data.pc, entry.data.offset, pattern});
+        this->set_mru(entry.key);
+        return old_entry;
+    }
+
+  private:
+    int pattern_len;
+};
+
+template <class T> vector<T> my_rotate(const vector<T> &x, int n) {
+    vector<T> y;
+    int len = x.size();
+    n = n % len;
+    for (int i = 0; i < len; i += 1)
+        y.push_back(x[(i - n + len) % len]);
+    return y;
+}
+
+#define THRESH 0.20
+
+class PatternHistoryTableData {
+  public:
+    vector<bool> pattern;
+};
+
+class PatternHistoryTable : LRUSetAssociativeCache<PatternHistoryTableData> {
+    typedef LRUSetAssociativeCache<PatternHistoryTableData> Super;
+
+  public:
+    PatternHistoryTable(
+        int size, int pattern_len, int min_addr_width, int max_addr_width, int pc_width, int num_ways = 16)
+        : Super(size, num_ways), pattern_len(pattern_len), min_addr_width(min_addr_width),
+          max_addr_width(max_addr_width), pc_width(pc_width) {
+        assert(this->pc_width >= 0);
+        assert(this->min_addr_width >= 0);
+        assert(this->max_addr_width >= 0);
+        assert(this->max_addr_width >= this->min_addr_width);
+        assert(this->pc_width + this->min_addr_width > 0);
+        assert(__builtin_popcount(pattern_len) == 1);
+        this->index_len = __builtin_ctz(this->num_sets);
+    }
+
+    /* address is actually block number */
+    void insert(uint64_t pc, uint64_t address, vector<bool> pattern) {
+        assert((int)pattern.size() == this->pattern_len);
+        int offset = address % this->pattern_len;
+        pattern = my_rotate(pattern, -offset);
+        uint64_t key = this->build_key(pc, address);
+        Super::insert(key, {pattern});
+        this->set_mru(key);
+    }
+
+    /**
+     * @return An un-rotated pattern if match was found, otherwise an empty vector.
+     * Finds best match and in case of ties, uses the MRU entry.
+     */
+    vector<bool> find(uint64_t pc, uint64_t address) {
+        uint64_t key = this->build_key(pc, address);
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        auto &set = this->entries[index];
+        uint64_t min_tag_mask = (1 << (this->pc_width + this->min_addr_width - this->index_len)) - 1;
+        uint64_t max_tag_mask = (1 << (this->pc_width + this->max_addr_width - this->index_len)) - 1;
+        vector<vector<bool>> min_matches;
+        vector<bool> pattern;
+        for (int i = 0; i < this->num_ways; i += 1) {
+            if (!set[i].valid)
+                continue;
+            bool min_match = ((set[i].tag & min_tag_mask) == (tag & min_tag_mask));
+            bool max_match = ((set[i].tag & max_tag_mask) == (tag & max_tag_mask));
+            vector<bool> &cur_pattern = set[i].data.pattern;
+            if (max_match) {
+                this->set_mru(set[i].key);
+                pattern = cur_pattern;
+                break;
+            }
+            if (min_match) {
+                min_matches.push_back(cur_pattern);
+            }
+        }
+        if (pattern.empty()) {
+            /* no max match was found, time for a vote! */
+            pattern = this->vote(min_matches);
+        }
+        int offset = address % this->pattern_len;
+        pattern = my_rotate(pattern, +offset);
+        return pattern;
+    }
+
+  private:
+    uint64_t build_key(uint64_t pc, uint64_t address) {
+        pc &= (1 << this->pc_width) - 1;            /* use [pc_width] bits from pc */
+        address &= (1 << this->max_addr_width) - 1; /* use [addr_width] bits from address */
+        uint64_t offset = address & ((1 << this->min_addr_width) - 1);
+        uint64_t base = (address >> this->min_addr_width);
+        /* base + pc + offset */
+        uint64_t key = (base << (this->pc_width + this->min_addr_width)) | (pc << this->min_addr_width) | offset;
+        /* CRC */
+        uint64_t tag = ((pc << this->min_addr_width) | offset);
+        do {
+            tag >>= this->index_len;
+            key ^= tag & ((1 << this->index_len) - 1);
+        } while (tag > 0);
+        return key;
+    }
+
+    vector<bool> vote(const vector<vector<bool>> &x, float thresh = THRESH) {
+        int n = x.size();
+        vector<bool> ret(this->pattern_len, false);
+        for (int i = 0; i < n; i += 1)
+            assert((int)x[i].size() == this->pattern_len);
+        for (int i = 0; i < this->pattern_len; i += 1) {
+            int cnt = 0;
+            for (int j = 0; j < n; j += 1)
+                if (x[j][i])
+                    cnt += 1;
+            if (1.0 * cnt / n >= thresh)
+                ret[i] = true;
+        }
+        return ret;
+    }
+
+    int pattern_len, index_len;
+    int min_addr_width, max_addr_width, pc_width;
+};
+
+class Bingo {
+  public:
+    Bingo(int pattern_len, int min_addr_width, int max_addr_width, int pc_width, int pattern_history_table_size,
+        int filter_table_size, int accumulation_table_size)
+        : pattern_len(pattern_len), filter_table(filter_table_size),
+          accumulation_table(accumulation_table_size, pattern_len),
+          pht(pattern_history_table_size, pattern_len, min_addr_width, max_addr_width, pc_width) {}
+
+    /**
+     * @return A vector of block numbers that should be prefetched.
+     */
+    vector<uint64_t> access(uint64_t block_number, uint64_t pc) {
+        if (this->debug_level >= 1) {
+            cerr << "[Bingo] access(block_number=" << block_number << ", pc=" << pc << ")" << endl;
+        }
+        uint64_t region_number = block_number / this->pattern_len;
+        int region_offset = block_number % this->pattern_len;
+        bool success = this->accumulation_table.set_pattern(region_number, region_offset);
+        if (success)
+            return vector<uint64_t>();
+        FilterTable::Entry *entry = this->filter_table.find(region_number);
+        if (!entry) {
+            /* trigger access */
+            this->filter_table.insert(region_number, pc, region_offset);
+            vector<bool> pattern = this->find_in_phts(pc, block_number);
+            if (pattern.empty())
+                return vector<uint64_t>();
+            vector<uint64_t> to_prefetch;
+            for (int i = 0; i < this->pattern_len; i += 1)
+                if (pattern[i])
+                    to_prefetch.push_back(region_number * this->pattern_len + i);
+            return to_prefetch;
+        }
+        if (entry->data.offset != region_offset) {
+            /* move from filter table to accumulation table */
+            AccumulationTable::Entry victim = this->accumulation_table.insert(*entry);
+            this->accumulation_table.set_pattern(region_number, region_offset);
+            this->filter_table.erase(region_number);
+            if (victim.valid) {
+                /* move from accumulation table to pattern history table */
+                this->insert_in_phts(victim);
+            }
+        }
+        return vector<uint64_t>();
+    }
+
+    void eviction(uint64_t block_number) {
+        if (this->debug_level >= 1) {
+            cerr << "[Bingo] eviction(block_number=" << block_number << ")" << endl;
+        }
+        /* end of generation */
+        uint64_t region_number = block_number / this->pattern_len;
+        this->filter_table.erase(region_number);
+        AccumulationTable::Entry *entry = this->accumulation_table.erase(region_number);
+        if (entry) {
+            /* move from accumulation table to pattern history table */
+            this->insert_in_phts(*entry);
+        }
+    }
+
+    void set_debug_level(int debug_level) { this->debug_level = debug_level; }
+
+  private:
+    vector<bool> find_in_phts(uint64_t pc, uint64_t address) {
+        if (this->debug_level >= 1) {
+            cerr << "[Bingo] find_in_phts(pc=" << pc << ", address=" << address << ")" << endl;
+        }
+        return this->pht.find(pc, address);
+    }
+
+    void insert_in_phts(const AccumulationTable::Entry &entry) {
+        if (this->debug_level >= 1) {
+            cerr << "[Bingo] insert_in_phts(...)" << endl;
+        }
+        uint64_t pc = entry.data.pc;
+        uint64_t address = entry.key * this->pattern_len + entry.data.offset;
+        const vector<bool> &pattern = entry.data.pattern;
+        this->pht.insert(pc, address, pattern);
+    }
+
+    int pattern_len;
+    FilterTable filter_table;
+    AccumulationTable accumulation_table;
+    PatternHistoryTable pht;
+    int debug_level = 0;
+};
+
+/* Bingo settings */
+const int REGION_SIZE = 2 * 1024;
+const int MIN_ADDR_WIDTH = 5;
+const int MAX_ADDR_WIDTH = 16;
+const int PC_WIDTH = 16;
+const int PHT_SIZE = 2 * 1024;
+const int FT_SIZE = 64;
+const int AT_SIZE = 128;
+
+vector<Bingo> prefetchers;
+
+void CACHE::llc_prefetcher_initialize_(uint32_t cpu) {
+    if (cpu != 0)
+        return;
+
+    /* create prefetcher for all cores */
+    assert(PAGE_SIZE % REGION_SIZE == 0);
+    prefetchers = vector<Bingo>(NUM_CPUS, Bingo(REGION_SIZE >> LOG2_BLOCK_SIZE, MIN_ADDR_WIDTH, MAX_ADDR_WIDTH,
+        PC_WIDTH, PHT_SIZE, FT_SIZE, AT_SIZE));
+}
+
+void CACHE::llc_prefetcher_operate_(uint32_t cpu, uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type) {
+    /* call prefetcher and send prefetches */
+    uint64_t block_number = addr >> LOG2_BLOCK_SIZE;
+    vector<uint64_t> to_prefetch = prefetchers[cpu].access(block_number, ip);
+    for (auto &pf_block_number : to_prefetch) {
+        uint64_t pf_address = pf_block_number << LOG2_BLOCK_SIZE;
+        prefetch_line(cpu, ip, addr, pf_address, FILL_LLC);
+    }
+}
+
+void CACHE::llc_prefetcher_cache_fill_(uint32_t cpu, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch,uint64_t evicted_addr) {
+    /* inform all bingo modules of the eviction */
+    for (int i = 0; i < NUM_CPUS; i += 1)
+        prefetchers[i].eviction(evicted_addr >> LOG2_BLOCK_SIZE);
+}
+
+void CACHE::llc_prefetcher_inform_warmup_complete_() {}
+
+void CACHE::llc_prefetcher_inform_roi_complete_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_roi_stats_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_final_stats_(uint32_t cpu) {}

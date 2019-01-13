@@ -1,0 +1,5 @@
+lbm_1004B omnetpp_340B soplex_217B sphinx3_2520B
+lbm_1004B libquantum_1735B sphinx3_2520B zeusmp_600B
+milc_744B omnetpp_340B perlbench_135B soplex_217B
+astar_313B omnetpp_340B soplex_217B tonto_2834B
+GemsFDTD_716B gromacs_1B omnetpp_340B soplex_217B

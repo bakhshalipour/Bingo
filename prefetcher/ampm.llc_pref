@@ -1,0 +1,624 @@
+/* AMPM [https://www.jilp.org/vol13/v13paper3.pdf] */
+
+#include "cache.h"
+#include <bits/stdc++.h>
+
+using namespace std;
+
+class Table {
+  public:
+    Table(int width, int height) : width(width), height(height), cells(height, vector<string>(width)) {}
+
+    void set_row(int row, const vector<string> &data, int start_col = 0) {
+        assert(data.size() + start_col == this->width);
+        for (unsigned col = start_col; col < this->width; col += 1)
+            this->set_cell(row, col, data[col]);
+    }
+
+    void set_col(int col, const vector<string> &data, int start_row = 0) {
+        assert(data.size() + start_row == this->height);
+        for (unsigned row = start_row; row < this->height; row += 1)
+            this->set_cell(row, col, data[row]);
+    }
+
+    void set_cell(int row, int col, string data) {
+        assert(0 <= row && row < (int)this->height);
+        assert(0 <= col && col < (int)this->width);
+        this->cells[row][col] = data;
+    }
+
+    void set_cell(int row, int col, double data) {
+        this->oss.str("");
+        this->oss << setw(11) << fixed << setprecision(8) << data;
+        this->set_cell(row, col, this->oss.str());
+    }
+
+    void set_cell(int row, int col, int64_t data) {
+        this->oss.str("");
+        this->oss << setw(11) << std::left << data;
+        this->set_cell(row, col, this->oss.str());
+    }
+
+    void set_cell(int row, int col, int data) { this->set_cell(row, col, (int64_t)data); }
+
+    void set_cell(int row, int col, uint64_t data) { this->set_cell(row, col, (int64_t)data); }
+
+    string to_string() {
+        vector<int> widths;
+        for (unsigned i = 0; i < this->width; i += 1) {
+            int max_width = 0;
+            for (unsigned dir = 0; dir < this->height; dir += 1)
+                max_width = max(max_width, (int)this->cells[dir][i].size());
+            widths.push_back(max_width + 2);
+        }
+        string out;
+        out += Table::top_line(widths);
+        out += this->data_row(0, widths);
+        for (unsigned i = 1; i < this->height; i += 1) {
+            out += Table::mid_line(widths);
+            out += this->data_row(i, widths);
+        }
+        out += Table::bot_line(widths);
+        return out;
+    }
+
+    string data_row(int row, const vector<int> &widths) {
+        string out;
+        for (unsigned i = 0; i < this->width; i += 1) {
+            string data = this->cells[row][i];
+            data.resize(widths[i] - 2, ' ');
+            out += " | " + data;
+        }
+        out += " |\n";
+        return out;
+    }
+
+    static string top_line(const vector<int> &widths) { return Table::line(widths, "┌", "┬", "┐"); }
+
+    static string mid_line(const vector<int> &widths) { return Table::line(widths, "├", "┼", "┤"); }
+
+    static string bot_line(const vector<int> &widths) { return Table::line(widths, "└", "┴", "┘"); }
+
+    static string line(const vector<int> &widths, string left, string mid, string right) {
+        string out = " " + left;
+        for (unsigned i = 0; i < widths.size(); i += 1) {
+            int w = widths[i];
+            for (int dir = 0; dir < w; dir += 1)
+                out += "─";
+            if (i != widths.size() - 1)
+                out += mid;
+            else
+                out += right;
+        }
+        return out + "\n";
+    }
+
+  private:
+    unsigned width;
+    unsigned height;
+    vector<vector<string>> cells;
+    ostringstream oss;
+};
+
+template <class T> class InfiniteCache {
+  public:
+    class Entry {
+      public:
+        uint64_t key;
+        uint64_t index;
+        uint64_t tag;
+        bool valid;
+        T data;
+    };
+
+    Entry *erase(uint64_t key) {
+        Entry *entry = this->find(key);
+        if (!entry)
+            return nullptr;
+        entry->valid = false;
+        this->last_erased_entry = *entry;
+        int num_erased = this->entries.erase(key);
+        assert(num_erased == 1);
+        return &this->last_erased_entry;
+    }
+
+    /**
+     * @return The old state of the entry that was written to.
+     */
+    Entry insert(uint64_t key, const T &data) {
+        Entry *entry = this->find(key);
+        if (entry != nullptr) {
+            Entry old_entry = *entry;
+            entry->data = data;
+            return old_entry;
+        }
+        entries[key] = {key, 0, key, true, data};
+        return {};
+    }
+
+    Entry *find(uint64_t key) {
+        auto it = this->entries.find(key);
+        if (it == this->entries.end())
+            return nullptr;
+        Entry &entry = (*it).second;
+        assert(entry.tag == key && entry.valid);
+        return &entry;
+    }
+
+    /**
+     * For debugging purposes.
+     */
+    string log(vector<string> headers, function<void(Entry &, Table &, int)> write_data) {
+        Table table(headers.size(), entries.size() + 1);
+        table.set_row(0, headers);
+        unsigned i = 0;
+        for (auto &x : this->entries)
+            write_data(x.second, table, ++i);
+        return table.to_string();
+    }
+
+    void set_debug_level(int debug_level) { this->debug_level = debug_level; }
+
+  protected:
+    Entry last_erased_entry;
+    unordered_map<uint64_t, Entry> entries;
+    int debug_level = 0;
+};
+
+template <class T> class SetAssociativeCache {
+  public:
+    class Entry {
+      public:
+        uint64_t key;
+        uint64_t index;
+        uint64_t tag;
+        bool valid;
+        T data;
+    };
+
+    SetAssociativeCache(int size, int num_ways)
+        : size(size), num_ways(num_ways), num_sets(size / num_ways), entries(num_sets, vector<Entry>(num_ways)),
+          cams(num_sets) {
+        assert(size % num_ways == 0);
+        for (int i = 0; i < num_sets; i += 1)
+            for (int dir = 0; dir < num_ways; dir += 1)
+                entries[i][dir].valid = false;
+    }
+
+    Entry *erase(uint64_t key) {
+        Entry *entry = this->find(key);
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        auto &cam = cams[index];
+        int num_erased = cam.erase(tag);
+        if (entry)
+            entry->valid = false;
+        assert(entry ? num_erased == 1 : num_erased == 0);
+        return entry;
+    }
+
+    /**
+     * @return The old state of the entry that was written to.
+     */
+    Entry insert(uint64_t key, const T &data) {
+        Entry *entry = this->find(key);
+        if (entry != nullptr) {
+            Entry old_entry = *entry;
+            entry->data = data;
+            return old_entry;
+        }
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        vector<Entry> &set = this->entries[index];
+        int victim_way = -1;
+        for (int i = 0; i < this->num_ways; i += 1)
+            if (!set[i].valid) {
+                victim_way = i;
+                break;
+            }
+        if (victim_way == -1) {
+            victim_way = this->select_victim(index);
+        }
+        Entry &victim = set[victim_way];
+        Entry old_entry = victim;
+        victim = {key, index, tag, true, data};
+        auto &cam = cams[index];
+        if (old_entry.valid) {
+            int num_erased = cam.erase(old_entry.tag);
+            assert(num_erased == 1);
+        }
+        cam[tag] = victim_way;
+        return old_entry;
+    }
+
+    Entry *find(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        auto &cam = cams[index];
+        if (cam.find(tag) == cam.end())
+            return nullptr;
+        int way = cam[tag];
+        Entry &entry = this->entries[index][way];
+        assert(entry.tag == tag && entry.valid);
+        return &entry;
+    }
+
+    /**
+     * For debugging purposes.
+     */
+    string log(vector<string> headers, function<void(Entry &, Table &, int)> write_data) {
+        vector<Entry> valid_entries = this->get_valid_entries();
+        Table table(headers.size(), valid_entries.size() + 1);
+        table.set_row(0, headers);
+        for (unsigned i = 0; i < valid_entries.size(); i += 1)
+            write_data(valid_entries[i], table, i + 1);
+        return table.to_string();
+    }
+
+    void set_debug_level(int debug_level) { this->debug_level = debug_level; }
+
+  protected:
+    /**
+     * @return The way of the selected victim.
+     */
+    virtual int select_victim(uint64_t index) {
+        /* random eviction policy if not overriden */
+        return rand() % this->num_ways;
+    }
+
+    vector<Entry> get_valid_entries() {
+        vector<Entry> valid_entries;
+        for (int i = 0; i < num_sets; i += 1)
+            for (int dir = 0; dir < num_ways; dir += 1)
+                if (entries[i][dir].valid)
+                    valid_entries.push_back(entries[i][dir]);
+        return valid_entries;
+    }
+
+    int size;
+    int num_ways;
+    int num_sets;
+    vector<vector<Entry>> entries;
+    vector<unordered_map<uint64_t, int>> cams;
+    int debug_level = 0;
+};
+
+template <class T> class LRUSetAssociativeCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    LRUSetAssociativeCache(int size, int num_ways)
+        : Super(size, num_ways), lru(this->num_sets, vector<uint64_t>(num_ways)) {}
+
+    void set_mru(uint64_t key) { *this->get_lru(key) = this->t++; }
+
+    void set_lru(uint64_t key) { *this->get_lru(key) = 0; }
+
+  protected:
+    /* @override */
+    int select_victim(uint64_t index) {
+        vector<uint64_t> &lru_set = this->lru[index];
+        return min_element(lru_set.begin(), lru_set.end()) - lru_set.begin();
+    }
+
+    uint64_t *get_lru(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        int way = this->cams[index][tag];
+        return &this->lru[index][way];
+    }
+
+    vector<vector<uint64_t>> lru;
+    uint64_t t = 0;
+};
+
+template <class T> class NMRUSetAssociativeCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    NMRUSetAssociativeCache(int size, int num_ways) : Super(size, num_ways), mru(this->num_sets) {}
+
+    void set_mru(uint64_t key) {
+        uint64_t index = key % this->num_sets;
+        uint64_t tag = key / this->num_sets;
+        int way = this->cams[index][tag];
+        this->mru[index] = way;
+    }
+
+  protected:
+    /* @override */
+    int select_victim(uint64_t index) {
+        int way = rand() % (this->num_ways - 1);
+        if (way >= mru[index])
+            way += 1;
+        return way;
+    }
+
+    vector<int> mru;
+};
+
+template <class T> class LRUFullyAssociativeCache : public LRUSetAssociativeCache<T> {
+    typedef LRUSetAssociativeCache<T> Super;
+
+  public:
+    LRUFullyAssociativeCache(int size) : Super(size, size) {}
+};
+
+template <class T> class NMRUFullyAssociativeCache : public NMRUSetAssociativeCache<T> {
+    typedef NMRUSetAssociativeCache<T> Super;
+
+  public:
+    NMRUFullyAssociativeCache(int size) : Super(size, size) {}
+};
+
+template <class T> class DirectMappedCache : public SetAssociativeCache<T> {
+    typedef SetAssociativeCache<T> Super;
+
+  public:
+    DirectMappedCache(int size) : Super(size, 1) {}
+};
+
+/** End Of Cache Framework **/
+
+enum State { INIT = 0, PREFTCH = 1, ACCESS = 2 };
+string state_string[] = {"I", "P", "A"};
+
+class AccessMapData {
+  public:
+    vector<State> access_map;
+};
+
+int cap(int x, int le, int ri) {
+    if (x < le)
+        return le;
+    if (x > ri)
+        return ri;
+    return x;
+}
+
+class AccessMapTable : public LRUSetAssociativeCache<AccessMapData> {
+    typedef LRUSetAssociativeCache<AccessMapData> Super;
+
+  public:
+    AccessMapTable(int size, int num_ways, int blocks_in_zone)
+        : Super(size, num_ways), blocks_in_zone(blocks_in_zone) {}
+
+    void set_state(uint64_t block_number, State new_state) {
+        uint64_t zone_number = block_number / this->blocks_in_zone;
+        int zone_offset = block_number % this->blocks_in_zone;
+        Entry *entry = this->find(zone_number);
+        if (!entry) {
+            this->insert(zone_number, {vector<State>(blocks_in_zone, State::INIT)});
+            entry = this->find(zone_number);
+        }
+        this->set_mru(zone_number);
+        State old_state = entry->data.access_map[zone_offset];
+        assert(old_state != State::ACCESS || new_state != State::PREFTCH); /* no such transition */
+        if (this->debug_level >= 1) {
+            cerr << "[AMT] block " << block_number << " transition from " << state_string[old_state] << " to "
+                 << state_string[new_state] << endl;
+        }
+        entry->data.access_map[zone_offset] = new_state;
+        /* update statistics */
+        if (old_state == State::PREFTCH && new_state == State::ACCESS)
+            n_gp += 1;
+        if (old_state == State::INIT && new_state == State::PREFTCH)
+            n_tp += 1;
+        if ((old_state == State::INIT || old_state == State::PREFTCH) && new_state == State::ACCESS)
+            n_cm += 1;
+        if (old_state == State::ACCESS && new_state == State::ACCESS)
+            n_ch += 1;
+    }
+
+    vector<State> get_zone(uint64_t zone_number) {
+        Entry *entry = this->find(zone_number);
+        if (!entry)
+            return vector<State>(this->blocks_in_zone, State::INIT);
+        this->set_mru(zone_number);
+        return entry->data.access_map;
+    }
+
+    int update_prefetch_degree(int delta_clk) {
+        /* update prefetch degree on each epoch */
+        clk += delta_clk;
+        if (clk < this->TEPOCH)
+            return this->prefetch_degree;
+        clk -= this->TEPOCH;
+        /* calculate m_useful */
+        float p_coverage = 100.0 * n_gp / n_cm;
+        float p_accuracy = 100.0 * n_gp / n_tp;
+        float p_cachehit = 100.0 * n_ch / (n_cm + n_ch);
+        if (this->debug_level >= 1) {
+            cerr << "[AMT] n_gp=" << n_gp << endl;
+            cerr << "[AMT] n_tp=" << n_tp << endl;
+            cerr << "[AMT] n_cm=" << n_cm << endl;
+            cerr << "[AMT] n_ch=" << n_ch << endl;
+            cerr << "[AMT] p_coverage=" << p_coverage << endl;
+            cerr << "[AMT] p_accuracy=" << p_accuracy << endl;
+            cerr << "[AMT] p_cachehit=" << p_cachehit << endl;
+        }
+        n_gp = n_tp = n_cm = n_ch = 0; /* reset stats */
+        if (p_coverage > 25 && p_accuracy > 50)
+            this->m_useful += 1;
+        if (p_coverage > 25 && p_cachehit < 75)
+            this->m_useful += 1;
+        if (p_accuracy < 25 && p_cachehit > 87.5)
+            this->m_useful -= 1;
+        if (p_coverage < 12.5 && p_cachehit > 87.5)
+            this->m_useful -= 1;
+        if (p_coverage < 12.5 && p_accuracy < 25)
+            this->m_useful -= 1;
+        this->m_useful = cap(this->m_useful, 1, this->blocks_in_zone / 2 - 1);
+        /* calculate m_bandwidth */
+        uint64_t n_requests = n_cm - n_gp + n_tp;
+        this->m_bandwidth = n_requests * DRAM_FIXED_LATENCY / this->TEPOCH;
+        if (this->m_bandwidth == 0)
+            this->m_bandwidth = 1;
+        this->m_bandwidth = cap(this->m_bandwidth, 1, this->blocks_in_zone / 2 - 1);
+        /* The minimum value of the limits (Mbandwidth and Museful) is used as the actual maximum prefetch degree. */
+        this->prefetch_degree = min(this->m_bandwidth, this->m_useful);
+        if (this->debug_level >= 1) {
+            cerr << "[AMT] m_useful=" << this->m_useful << endl;
+            cerr << "[AMT] m_bandwidth=" << this->m_bandwidth << endl;
+            cerr << "[AMT] prefetch_degree=" << this->prefetch_degree << endl;
+        }
+        return this->prefetch_degree;
+    }
+
+    string log() {
+        vector<string> headers({"Zone", "Access Map"});
+        return Super::log(headers, this->write_data);
+    }
+
+  private:
+    static void write_data(Entry &entry, Table &table, int row) {
+        table.set_cell(row, 0, entry.key);
+        string map = "";
+        for (unsigned i = 0; i < entry.data.access_map.size(); i += 1)
+            map += state_string[entry.data.access_map[i]];
+        table.set_cell(row, 1, map);
+    }
+
+    unsigned blocks_in_zone;
+    /**
+     * ┌─────────┬────────────────────────────┬───────────────────────────────────────┐
+     * |   NGP   | Number of Good Prefetches  | From “Prefetch” to “Access”           |
+     * ├─────────┼────────────────────────────┼───────────────────────────────────────┤
+     * |   NTP   | Total Number of Prefetches | From “Init” to “Prefetch”             |
+     * ├─────────┼────────────────────────────┼───────────────────────────────────────┤
+     * |   NCM   | Number of Raw Cache Misses | From “Init” or “Prefetch” to “Access” |
+     * ├─────────┼────────────────────────────┼───────────────────────────────────────┤
+     * |   NCH   | Number of Raw Cache Hits   | From “Access” to “Access”             |
+     * └─────────┴────────────────────────────┴───────────────────────────────────────┘
+     */
+    uint64_t clk = 0;
+    uint64_t n_gp = 0, n_tp = 0, n_cm = 0, n_ch = 0;
+    uint64_t m_useful = 0, m_bandwidth = 0, prefetch_degree = 1;
+    /* In this study, Tepoch is 256K processor clock cycles */
+    const uint64_t TEPOCH = 256 * 1024;
+    const uint64_t DRAM_FIXED_LATENCY = 240;
+};
+
+class AMPM {
+  public:
+    AMPM(int blocks_in_cache, int blocks_in_zone, int prefetch_degree, bool adaptive_prefetch, int access_map_ways = 8)
+        : blocks_in_zone(blocks_in_zone), prefetch_degree(prefetch_degree), adaptive_prefetch(adaptive_prefetch),
+          access_map_table(blocks_in_cache / blocks_in_zone, access_map_ways, blocks_in_zone) {}
+
+    /**
+     * @return A vector of block numbers that should be prefetched.
+     */
+    vector<uint64_t> access(uint64_t block_number, int delta_clk = 0) {
+        uint64_t zone_number = block_number / this->blocks_in_zone;
+        int zone_offset = block_number % this->blocks_in_zone;
+        this->access_map_table.set_state(block_number, State::ACCESS);
+        if (this->debug_level >= 2) {
+            cerr << access_map_table.log();
+        }
+        vector<State> concatenated_zones;
+        concatenated_zones.reserve(3 * this->blocks_in_zone);
+        for (int i = -1; i <= +1; i += 1) {
+            vector<State> zone = this->access_map_table.get_zone(zone_number + i);
+            concatenated_zones.insert(concatenated_zones.end(), zone.begin(), zone.end());
+        }
+        vector<uint64_t> to_prefetch =
+            this->generate_prefetches(concatenated_zones, this->blocks_in_zone + zone_offset, zone_number - 1);
+        assert((int)to_prefetch.size() < this->blocks_in_zone / 2);
+        /* do not prefetch beyond page boundaries */
+        for (unsigned i = 0; i < to_prefetch.size(); i += 1)
+            if (to_prefetch[i] / this->blocks_in_zone != zone_number) {
+                to_prefetch.erase(to_prefetch.begin() + i);
+                i -= 1;
+            }
+        /* prefetch only [prefetch_degree] number of prefetch candidates */
+        if ((int)to_prefetch.size() > this->prefetch_degree)
+            to_prefetch.resize(this->prefetch_degree);
+        /* set state of prefetched blocks to PREFTCH */
+        for (auto &block_number : to_prefetch)
+            this->access_map_table.set_state(block_number, State::PREFTCH);
+        /* adaptive prefetch */
+        if (this->adaptive_prefetch)
+            this->prefetch_degree = this->access_map_table.update_prefetch_degree(delta_clk);
+        assert(0 < prefetch_degree && prefetch_degree < this->blocks_in_zone / 2);
+        return to_prefetch;
+    }
+
+    void set_debug_level(int debug_level) {
+        this->debug_level = debug_level;
+        this->access_map_table.set_debug_level(debug_level);
+    }
+
+    int get_prefetch_degree() { return this->prefetch_degree; }
+
+  private:
+    vector<uint64_t> generate_prefetches(const vector<State> &map, int offset, uint64_t base) {
+        vector<uint64_t> to_prefetch;
+        /* test strides */
+        for (int stride = 1; stride < this->blocks_in_zone / 2; stride += 1) {
+            for (int dir = 1; dir >= -1; dir -= 2) {
+                int delta = stride * dir;
+                if (map[offset - delta] == State::ACCESS &&
+                    (map[offset - (2 * delta)] == State::ACCESS || map[offset - (2 * delta + dir)] == State::ACCESS) &&
+                    map[offset + delta] == State::INIT)
+                    to_prefetch.push_back(base * this->blocks_in_zone + offset + delta);
+            }
+        }
+        return to_prefetch;
+    }
+
+    int blocks_in_zone;
+    int prefetch_degree;
+    bool adaptive_prefetch;
+    AccessMapTable access_map_table;
+    int debug_level = 0;
+};
+
+/* debugging parameters */
+const int DEBUG_LEVEL = 0;
+const int DEBUG_START = 0;
+const int DEBUG_STOP = 0;
+
+/* AMPM settings */
+const bool ADAPTIVE_PREFETCH = false;
+const int PREFETCH_DEGREE = 16; /* has effect only if adaptive prefetch is off */
+
+vector<AMPM> prefetchers;
+uint64_t clk[NUM_CPUS];
+
+void CACHE::llc_prefetcher_initialize_(uint32_t cpu) {
+    /* initialize clk of each core */
+    clk[cpu] = current_core_cycle[cpu];
+
+    if (cpu != 0)
+        return;
+
+    /* create prefetcher for all cores */
+    const int BLOCKS_IN_CACHE = CACHE::NUM_SET * CACHE::NUM_WAY / NUM_CPUS;
+    const int BLOCKS_IN_ZONE = PAGE_SIZE / BLOCK_SIZE;
+    prefetchers = vector<AMPM>(NUM_CPUS, AMPM(BLOCKS_IN_CACHE, BLOCKS_IN_ZONE, PREFETCH_DEGREE, ADAPTIVE_PREFETCH));
+}
+
+void CACHE::llc_prefetcher_operate_(uint32_t cpu, uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type) {
+    uint64_t delta_clk = clk[cpu] - current_core_cycle[cpu];
+    clk[cpu] = current_core_cycle[cpu];
+
+    /* call prefetcher and send prefetches */
+    uint64_t block_number = addr >> LOG2_BLOCK_SIZE;
+    vector<uint64_t> to_prefetch = prefetchers[cpu].access(block_number, delta_clk);
+    for (auto &pf_block_number : to_prefetch) {
+        uint64_t pf_address = pf_block_number << LOG2_BLOCK_SIZE;
+        /* champsim automatically ignores prefetches that cross page boundaries */
+        prefetch_line(cpu, ip, addr, pf_address, FILL_LLC);
+    }
+}
+
+void CACHE::llc_prefetcher_cache_fill_(
+    uint32_t cpu, uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr) {}
+
+void CACHE::llc_prefetcher_inform_warmup_complete_() {}
+
+void CACHE::llc_prefetcher_inform_roi_complete_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_roi_stats_(uint32_t cpu) {}
+
+void CACHE::llc_prefetcher_final_stats_(uint32_t cpu) {}
