@@ -15,3 +15,5 @@ This source code includes the implementation of our proposal, named **Bingo**, a
 <br/>
 
 *Please cite our paper if you use this code in your own work.*
+
+![#1589F0](https://via.placeholder.com/15/1589F0/000000?text=+) UPDATE: Bingo was recognized as the **best** data prefetching approach for multi-core processors in the [Third Data Prefetching Championship (DPC-3)](https://dpc3.compas.cs.stonybrook.edu/slides/dpc3_closing.pdf), co-located with International Symposium on Computer Architecture (ISCA), 2019.
