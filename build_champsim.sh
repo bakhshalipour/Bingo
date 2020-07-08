@@ -1,4 +1,11 @@
 # ChampSim configuration
+
+if [ "$#" -ne 5 ]; then
+    echo "Illegal number of parameters"
+    echo "Usage: ./build_champsim.sh [branch_pred] [l1d_pref] [llc_pref] [llc_repl] [num_core]"
+    exit 1
+fi
+
 BRANCH=$1           # branch/*.bpred
 L1D_PREFETCHER=$2   # prefetcher/*.l1d_pref
 LLC_PREFETCHER=$3   # prefetcher/*.llc_pref
@@ -69,7 +76,7 @@ cp replacement/${LLC_REPLACEMENT}.llc_repl replacement/llc_replacement.cc
 mkdir -p bin
 rm -f bin/champsim
 make clean
-make -j16
+make -j #16
 
 # Sanity check
 echo ""

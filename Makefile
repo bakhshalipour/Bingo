@@ -8,7 +8,7 @@ inc = inc
 
 debug = 1
 
-CFlags = -Wall -O3 -std=c++11
+CFlags = -Wall -O3 -std=c++11 -Wno-misleading-indentation -Wno-unused-variable -Wno-unused-but-set-variable
 LDFlags =
 libs =
 libDir =
