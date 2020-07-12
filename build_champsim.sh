@@ -6,10 +6,25 @@ if [ "$#" -ne 5 ]; then
     exit 1
 fi
 
-BRANCH=$1           # branch/*.bpred
-L1D_PREFETCHER=$2   # prefetcher/*.l1d_pref
-LLC_PREFETCHER=$3   # prefetcher/*.llc_pref
-LLC_REPLACEMENT=$4  # replacement/*.llc_repl
+# This function gets the path (relative to this
+# script) of a component (e.g., a prefetcher) and
+# returns the name of the component. It's designed to
+# enjoy bash's auto-completion.
+_extract_component_name() {
+    # $1: path, e.g., prefetcher/next_line.l1d_pref
+    # $2: directory, e.g., prefetcher
+    # $3: suffix, e.g., l1d_pref
+    # output: component name, e.g., next_line
+    tmp=$1
+    tmp=${tmp#$2/}
+    tmp=${tmp%.$3}
+    echo $tmp
+}
+
+BRANCH=$(_extract_component_name $1 branch bpred)                   # branch/*.bpred
+L1D_PREFETCHER=$(_extract_component_name $2 prefetcher l1d_pref)    # prefetcher/*.l1d_pref
+LLC_PREFETCHER=$(_extract_component_name $3 prefetcher llc_pref)    # prefetcher/*.llc_pref
+LLC_REPLACEMENT=$(_extract_component_name $4 replacement llc_repl)  # replacement/*.llc_repl
 NUM_CORE=$5         # tested up to 8-core system
 
 ############## Some useful macros ###############
