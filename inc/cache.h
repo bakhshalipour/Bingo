@@ -108,7 +108,7 @@ class Stats {
 
         /* check prefetch hit */
         if (cache_hit == 1) {
-            for (int i = 0; i < 4; i += 1) {
+            for (int i = 0; i < NUM_CPUS; i += 1) {
                 int cnt = this->prefetched_blocks[i].erase(addr);
                 if (cnt == 1) {
                     (*this->cur_stats[i])["Prefetch Hits"] += 1;
@@ -126,7 +126,7 @@ class Stats {
         addr <<= LOG2_BLOCK_SIZE;
         evicted_addr <<= LOG2_BLOCK_SIZE;
         
-        for (int i = 0; i < 4; i += 1) {
+        for (int i = 0; i < NUM_CPUS; i += 1) {
             int cnt = this->prefetched_blocks[i].erase(evicted_addr);
             if (cnt == 1) {
                 (*this->cur_stats[i])["Non-useful Prefetches"] += 1;
